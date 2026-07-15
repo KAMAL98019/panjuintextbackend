@@ -56,11 +56,12 @@ async function main() {
   }
   console.log('Ensured counters exist.');
 
-  await seedExampleOrder();
-  await seedUnbilledOrder();
-  await seedFreshTestOrder();
-  await seedRevisedQuotation();
-  await seedTwoPageQuotation();
+  // Clean setup: skipped demo data seeding
+  // await seedExampleOrder();
+  // await seedUnbilledOrder();
+  // await seedFreshTestOrder();
+  // await seedRevisedQuotation();
+  // await seedTwoPageQuotation();
 }
 
 /**
