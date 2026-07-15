@@ -1,0 +1,17 @@
+const express = require('express');
+const router = express.Router();
+const controller = require('../controllers/product.controller');
+const requireAuth = require('../middleware/auth');
+const validate = require('../middleware/validate');
+const { upsert } = require('../validators/product.validator');
+
+router.use(requireAuth);
+
+router.get('/category-counts', controller.categoryCounts);
+router.get('/', controller.list);
+router.get('/:id', controller.getOne);
+router.post('/', upsert, validate, controller.create);
+router.put('/:id', upsert, validate, controller.update);
+router.delete('/:id', controller.remove);
+
+module.exports = router;

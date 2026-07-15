@@ -1,0 +1,346 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model CompanySettings {
+  id              Int      @id @default(autoincrement())
+  name            String
+  address         String   @db.Text
+  gstin           String
+  pan             String
+  email           String
+  phone           String
+  logoUrl         String?
+  state           String
+  ownerWhatsapp   String? // owner's WhatsApp mobile — where customer documents get sent (Case 1)
+  quotationPrefix String   @default("QT")
+  orderPrefix     String   @default("ORD")
+  invoicePrefix   String   @default("INV")
+  memoPrefix      String   @default("MEMO")
+  customerPrefix  String   @default("CUS")
+  updatedAt       DateTime @updatedAt
+}
+
+model Counter {
+  key        String @id
+  nextNumber Int    @default(1)
+}
+
+enum CustomerType {
+  Individual
+  Company
+}
+
+model Customer {
+  id           Int          @id @default(autoincrement())
+  customerCode String       @unique
+  name         String
+  mobile       String
+  altMobile    String?
+  email        String?
+  address      String       @db.Text
+  city         String
+  state        String
+  pincode      String
+  gstNumber    String?
+  customerType CustomerType @default(Individual)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  quotations Quotation[]
+  bills      Bill[]
+
+  @@index([mobile])
+  @@index([name])
+}
+
+enum ProductCategory {
+  MosquitoNet
+  Curtains
+  Wallpaper
+  WallSticker
+  Blinds
+  Accessories
+  Installation
+  Other
+}
+
+enum ProductStatus {
+  Active
+  Inactive
+}
+
+model Product {
+  id          Int             @id @default(autoincrement())
+  name        String
+  category    ProductCategory
+  unit        String
+  hsnCode     String?
+  gstPercent  Float           @default(18)
+  defaultRate Float
+  description String?         @db.Text
+  status      ProductStatus   @default(Active)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  quotationItems QuotationItem[]
+
+  @@index([category])
+  @@index([name])
+}
+
+enum QuotationStatus {
+  Draft
+  Sent
+  UnderNegotiation
+  Revised
+  Confirmed
+  Cancelled
+}
+
+enum QuotationType {
+  GST
+  NonGST
+}
+
+model Quotation {
+  id               Int             @id @default(autoincrement())
+  quotationNumber  String          @unique
+  customerId       Int
+  customer         Customer        @relation(fields: [customerId], references: [id])
+  status           QuotationStatus @default(Draft)
+  quotationType    QuotationType   @default(GST)
+  subtotal         Float           @default(0)
+  discountAmount   Float           @default(0)
+  cgst             Float           @default(0)
+  sgst             Float           @default(0)
+  igst             Float           @default(0)
+  gstAmount        Float           @default(0)
+  total            Float           @default(0)
+  remarks          String?         @db.Text
+  terms            String?         @db.Text
+  validityDays     Int             @default(7)
+  expectedDelivery DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  items     QuotationItem[]
+  revisions QuotationRevision[]
+  order     Order?
+
+  @@index([customerId])
+  @@index([status])
+}
+
+model QuotationItem {
+  id              Int       @id @default(autoincrement())
+  quotationId     Int
+  quotation       Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  productId       Int?
+  product         Product?  @relation(fields: [productId], references: [id])
+  description     String
+  hsnCode         String?
+  quantity        Float
+  unit            String
+  unitPrice       Float
+  discountPercent Float     @default(0)
+  gstPercent      Float     @default(0)
+  amount          Float
+
+  @@index([quotationId])
+}
+
+model QuotationRevision {
+  id             Int       @id @default(autoincrement())
+  quotationId    Int
+  quotation      Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  previousAmount Float
+  newAmount      Float
+  reason         String?
+  remarks        String?   @db.Text
+  createdAt      DateTime  @default(now())
+
+  @@index([quotationId])
+}
+
+enum OrderStatus {
+  QuotationCreated
+  Sent
+  Negotiation
+  Confirmed
+  AdvancePaid
+  MaterialOrdered
+  WorkStarted
+  Installation
+  Completed
+  FullyPaid
+}
+
+model Order {
+  id                 Int         @id @default(autoincrement())
+  orderNumber        String      @unique
+  quotationId        Int         @unique
+  quotation          Quotation   @relation(fields: [quotationId], references: [id])
+  orderDate          DateTime    @default(now())
+  expectedCompletion DateTime?
+  assignedStaff      String?
+  currentStatus      OrderStatus @default(Confirmed)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  payments Payment[]
+  bills    Bill[]
+
+  @@index([currentStatus])
+}
+
+enum PaymentType {
+  Advance
+  Partial
+  Final
+}
+
+model Payment {
+  id          Int         @id @default(autoincrement())
+  orderId     Int
+  order       Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type        PaymentType
+  amount      Float
+  paymentDate DateTime    @default(now())
+  paymentMode String
+  remarks     String?
+  createdAt   DateTime    @default(now())
+
+  @@index([orderId])
+}
+
+enum BillType {
+  Memo
+  GST
+}
+
+model Bill {
+  id           Int       @id @default(autoincrement())
+  billNumber   String    @unique
+  orderId      Int?
+  order        Order?    @relation(fields: [orderId], references: [id])
+  customerId   Int?
+  customer     Customer? @relation(fields: [customerId], references: [id])
+  billType     BillType
+  snapshotJson String    @db.LongText
+  generatedAt  DateTime  @default(now())
+  updatedAt    DateTime  @default(now()) @updatedAt
+
+  @@index([orderId])
+  @@index([customerId])
+}
+
+enum NotificationType {
+  QuotationStatusChanged
+  TrackingStatusChanged
+}
+
+model Notification {
+  id          Int              @id @default(autoincrement())
+  type        NotificationType
+  title       String
+  message     String
+  quotationId Int?
+  isRead      Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+enum WhatsappPurpose {
+  CustomerDocs
+  Greetings
+}
+
+enum WhatsappSessionStatus {
+  Disconnected
+  QrPending
+  Connected
+}
+
+model WhatsappSession {
+  purpose         WhatsappPurpose       @id
+  status          WhatsappSessionStatus @default(Disconnected)
+  qrDataUrl       String?               @db.Text
+  connectedNumber String?
+  updatedAt       DateTime              @updatedAt
+}
+
+model MessageTemplate {
+  id        Int             @id @default(autoincrement())
+  purpose   WhatsappPurpose
+  name      String
+  body      String          @db.Text
+  isDefault Boolean         @default(false)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([purpose])
+}
+
+enum MessageLogStatus {
+  Sent
+  Failed
+}
+
+model MessageLog {
+  id           Int              @id @default(autoincrement())
+  purpose      WhatsappPurpose
+  quotationId  Int?
+  customerId   Int?
+  toNumber     String
+  documentType String?
+  status       MessageLogStatus
+  error        String?          @db.Text
+  createdAt    DateTime         @default(now())
+
+  @@index([purpose])
+  @@index([customerId])
+}
+
+enum QueueStatus {
+  Pending
+  Processing
+  Sent
+  Failed
+}
+
+model WhatsappQueueItem {
+  id           Int              @id @default(autoincrement())
+  purpose      WhatsappPurpose
+  toNumber     String
+  message      String?          @db.Text
+  documentType String?          // For documents like Quotation, Memo, GST
+  quotationId  Int?
+  customerId   Int?
+  billId       Int?
+  status       QueueStatus      @default(Pending)
+  error        String?          @db.Text
+  attempts     Int              @default(0)
+  scheduledAt  DateTime         @default(now())
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([status])
+  @@index([scheduledAt])
+}
