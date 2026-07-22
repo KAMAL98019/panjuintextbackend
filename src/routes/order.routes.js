@@ -6,6 +6,7 @@ const billController = require('../controllers/bill.controller');
 const requireAuth = require('../middleware/auth');
 const validate = require('../middleware/validate');
 const { create: createPaymentValidator } = require('../validators/payment.validator');
+const { applyDiscount: applyDiscountValidator } = require('../validators/discount.validator');
 
 router.use(requireAuth);
 
@@ -14,6 +15,7 @@ router.get('/:id', controller.getOne);
 router.put('/:id', controller.update);
 router.patch('/:id/status', controller.updateStatus);
 router.patch('/:id/tracking', controller.updateTracking);
+router.post('/:id/discount', applyDiscountValidator, validate, controller.applyDiscount);
 
 router.get('/:orderId/payments', paymentController.list);
 router.post('/:orderId/payments', createPaymentValidator, validate, paymentController.create);
