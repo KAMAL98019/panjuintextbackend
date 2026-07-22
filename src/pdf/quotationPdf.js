@@ -30,7 +30,7 @@ function ensureSpace(doc, needed) {
   }
 }
 
-function drawRow(doc, cells, { bold = false, color = '#000000' } = {}) {
+function drawRow(doc, cells, { bold = true, color = '#000000' } = {}) {
   doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(8.5);
 
   // Row height grows with the tallest wrapped cell (long descriptions wrap onto extra lines)
@@ -97,7 +97,7 @@ function renderQuotationPdf(doc, { company, customer, quotation }) {
   drawLetterhead(doc);
 
   // TO block (left) and QTN number/date (right), side by side like the pad
-  const blockY = LH.top + 14;
+  const blockY = LH.top + 32;
   doc.font('Helvetica-Bold').fontSize(9).fillColor('#000000').text('TO:', LH.x, blockY);
   doc.font('Helvetica-Bold').fontSize(9.5);
   doc.text(customer.name, LH.x + 32, blockY, { width: 200 });
@@ -155,11 +155,11 @@ function renderQuotationPdf(doc, { company, customer, quotation }) {
   // Totals rows continue the same table grid
   drawTotalsRow(doc, 'Gross Total', quotation.subtotal);
   if (quotation.discountAmount > 0) {
-    drawTotalsRow(doc, 'Discount', -quotation.discountAmount, { bold: false, color: '#000000' });
+    drawTotalsRow(doc, 'Discount', -quotation.discountAmount, { color: '#000000' });
   }
   if (isGst) {
     groupByGstRate(quotation.items).forEach((g) => {
-      drawTotalsRow(doc, `GST ${g.rate} %`, g.taxAmount, { bold: false, color: '#000000' });
+      drawTotalsRow(doc, `GST ${g.rate} %`, g.taxAmount, { color: '#000000' });
     });
   }
 
@@ -168,7 +168,7 @@ function renderQuotationPdf(doc, { company, customer, quotation }) {
   const computedGrand = quotation.subtotal - (quotation.discountAmount || 0) + (isGst ? quotation.gstAmount || 0 : 0);
   const negotiatedDiff = computedGrand - quotation.total;
   if (Math.abs(negotiatedDiff) > 0.5) {
-    drawTotalsRow(doc, negotiatedDiff > 0 ? 'Special Discount' : 'Adjustment', -negotiatedDiff, { bold: false, color: '#000000' });
+    drawTotalsRow(doc, negotiatedDiff > 0 ? 'Special Discount' : 'Adjustment', -negotiatedDiff, { color: '#000000' });
   }
 
   drawTotalsRow(doc, 'Grand Total', quotation.total);
