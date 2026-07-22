@@ -11,9 +11,9 @@ const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 const LETTERHEAD_PATH = path.join(__dirname, '..', '..', 'assets', 'letterhead-a4.png');
 const LH = {
   x: 45, // left edge of the free content zone
-  right: 385, // the lime divider of the brand-logo strip sits at ~389pt
-  top: 115, // below the "PANJU INTEXT" title block
-  bottom: 745, // above the footer address bar
+  right: 460, // the lime divider of the brand-logo strip sits at ~464pt (measured off the artwork, 861px of 1086px wide)
+  top: 116, // below the tagline row ("Curtain & Rods . Blinds . ...")
+  bottom: 750, // above the footer address bar
 };
 
 /** Paints the full-page letterhead artwork and positions the cursor at the top of the content zone. */

@@ -182,7 +182,7 @@ function renderQuotationPdf(doc, { company, customer, quotation }) {
   doc.font('Helvetica').fillColor('#222222');
   doc.text(
     quotation.terms ||
-      `All prices quoted are valid for ${quotation.validityDays} days from the date of stated on the quotation. 50% advance for the order confirmation.`,
+    `All prices quoted are valid for ${quotation.validityDays} days from the date of stated on the quotation. 70% advance for the order confirmation.`,
     { width: LH.right - LH.x }
   );
   doc.fillColor('#000000');
