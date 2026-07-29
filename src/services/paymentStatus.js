@@ -16,18 +16,26 @@ function computePaymentStatus(quotationTotal, payments) {
   return { paid, pending, status };
 }
 
-/** Order timeline status auto-advances once the balance reaches zero. */
+/**
+ * Order timeline status auto-advances once the balance reaches zero. Lands on 'Completed' (the
+ * same terminal work stage staff would tap by hand) rather than the old separate 'FullyPaid'
+ * value — the Payment Status column already shows "Fully Paid" independently (computed above),
+ * so there's no information lost, and the tracking modal no longer needs a special case for a
+ * payment-only status that isn't one of its selectable work stages.
+ */
 function nextOrderStatusAfterPayment(currentStatus, pending, paidSoFar) {
-  if (pending <= 0) return 'FullyPaid';
+  if (pending <= 0) return 'Completed';
   if (paidSoFar > 0 && currentStatus === 'Confirmed') return 'AdvancePaid';
   return currentStatus;
 }
 
 /**
  * Amount corrections (unlike recording a payment) can move the balance back up as well as down —
- * e.g. a mistaken discount gets corrected back to the real total. If that pushes a previously
- * FullyPaid order back into having a balance, step it back to AdvancePaid/Confirmed so the badge
- * stays honest. Manually-tracked work stages (MaterialOrdered..Completed) are never touched here.
+ * e.g. a mistaken discount gets corrected back to the real total. If that reopens a balance on an
+ * order that was auto-marked FullyPaid (the legacy value some already-existing orders still carry),
+ * step it back to AdvancePaid/Confirmed so the badge stays honest. Deliberately does NOT demote a
+ * plain 'Completed' status — staff can mark work Completed by hand while payment is still pending,
+ * and an amount correction shouldn't second-guess that.
  */
 function syncOrderStatusForAmountChange(currentStatus, pending, paid) {
   if (currentStatus === 'FullyPaid' && pending > 0) {
