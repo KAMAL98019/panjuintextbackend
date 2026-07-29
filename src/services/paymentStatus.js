@@ -9,9 +9,9 @@ function computePaymentStatus(quotationTotal, payments) {
   const pending = round2(Math.max(quotationTotal - paid, 0));
 
   let status = 'Pending';
-  if (paid <= 0) status = 'Pending';
-  else if (pending <= 0) status = 'Fully Paid';
-  else status = 'Partially Paid';
+  if (pending <= 0) status = 'Fully Paid';
+  else if (paid > 0) status = 'Partially Paid';
+  else status = 'Pending';
 
   return { paid, pending, status };
 }
