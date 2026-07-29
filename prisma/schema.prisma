@@ -194,7 +194,7 @@ model Order {
   id                 Int         @id @default(autoincrement())
   orderNumber        String      @unique
   quotationId        Int         @unique
-  quotation          Quotation   @relation(fields: [quotationId], references: [id])
+  quotation          Quotation   @relation(fields: [quotationId], references: [id], onDelete: Cascade)
   orderDate          DateTime    @default(now())
   expectedCompletion DateTime?
   assignedStaff      String?
@@ -237,7 +237,7 @@ model Bill {
   id           Int       @id @default(autoincrement())
   billNumber   String    @unique
   orderId      Int?
-  order        Order?    @relation(fields: [orderId], references: [id])
+  order        Order?    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   customerId   Int?
   customer     Customer? @relation(fields: [customerId], references: [id])
   billType     BillType

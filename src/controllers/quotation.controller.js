@@ -1,6 +1,5 @@
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
-const prisma = require('../config/db');
 const quotationRepository = require('../repositories/quotation.repository');
 const customerRepository = require('../repositories/customer.repository');
 const settingsRepository = require('../repositories/settings.repository');
@@ -324,35 +323,40 @@ const confirm = asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: order });
 });
 
+/**
+ * Deleting a confirmed quotation is an admin's call, not the system's — cascades through
+ * QuotationItems/Revisions, the Order, its Payments, and any generated Bills (schema.prisma
+ * onDelete: Cascade). Irreversible; the frontend is responsible for warning about what's about
+ * to be destroyed before calling this.
+ */
 const remove = asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   const existing = await quotationRepository.findByIdRaw(id);
   if (!existing) throw new ApiError(404, 'Quotation not found');
-  if (existing.status === 'Confirmed') throw new ApiError(400, 'Cannot delete a confirmed quotation');
 
   await quotationRepository.remove(id);
   res.json({ success: true, message: 'Quotation deleted' });
 });
 
+/** Honours the same filters as the on-screen list/export, so the stat cards match whatever the table is currently showing. */
 const stats = asyncHandler(async (req, res) => {
-  const [totalQuotations, approvedCount, valueAgg, memoGeneratedCount] = await Promise.all([
-    prisma.quotation.count(),
-    prisma.quotation.count({ where: { status: 'Confirmed' } }),
-    prisma.quotation.aggregate({ _sum: { total: true } }),
-    prisma.bill.count({ where: { billType: 'Memo' } }),
-  ]);
+  const { search, status, type, dateFrom, dateTo, paymentStatus, hasBill } = req.query;
+  const { rows } = await quotationRepository.list({
+    search, status, quotationType: type, dateFrom, dateTo, hasBill, skip: 0, take: 100000,
+  });
 
+  let filtered = rows.map(withTrackingInfo);
+  if (paymentStatus) filtered = filtered.filter((q) => q.paymentInfo?.status === paymentStatus);
+
+  const totalQuotations = filtered.length;
+  const approvedCount = filtered.filter((q) => q.status === 'Confirmed').length;
   const approvedRate = totalQuotations > 0 ? Math.round((approvedCount / totalQuotations) * 100) : 0;
+  const totalValue = filtered.reduce((sum, q) => sum + (q.total || 0), 0);
+  const memoGeneratedCount = filtered.filter((q) => q.order?.bills?.some((b) => b.billType === 'Memo')).length;
 
   res.json({
     success: true,
-    data: {
-      totalQuotations,
-      approvedCount,
-      approvedRate,
-      totalValue: valueAgg._sum.total || 0,
-      memoGeneratedCount,
-    },
+    data: { totalQuotations, approvedCount, approvedRate, totalValue, memoGeneratedCount },
   });
 });
 
