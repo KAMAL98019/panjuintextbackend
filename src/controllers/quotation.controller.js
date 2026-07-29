@@ -208,12 +208,9 @@ const revise = asyncHandler(async (req, res) => {
   }
 
   // Editing after the order was confirmed (items already handed to production, maybe already
-  // billed/paid) is a bigger deal than pre-confirmation bargaining, so it requires a reason and
-  // never touches the quotation's own status — only the order's tracking status is re-derived.
+  // billed/paid) never touches the quotation's own status — only the order's tracking status is
+  // re-derived. Reason is optional, same as pre-confirmation bargaining.
   const isPostConfirmation = existing.status === 'Confirmed';
-  if (isPostConfirmation && !reason) {
-    throw new ApiError(400, 'A reason is required to edit a confirmed quotation');
-  }
 
   if (Array.isArray(items) && items.length > 0) {
     const { totals } = await computeQuotationTotals({
@@ -396,12 +393,32 @@ const exportExcel = asyncHandler(async (req, res) => {
     createdAt: q.createdAt.toISOString().slice(0, 10),
   }));
 
+  // Summary row reflecting exactly what's being exported (same filtered set as the on-screen list).
+  const sums = exportRows.reduce((acc, q) => ({
+    total: acc.total + (q.total || 0),
+    paid: acc.paid + (q.paymentInfo ? q.paymentInfo.paid : 0),
+    pending: acc.pending + (q.paymentInfo ? q.paymentInfo.pending : 0),
+  }), { total: 0, paid: 0, pending: 0 });
+  const totalsRow = {
+    quotationNumber: 'TOTAL',
+    customerName: `${exportRows.length} quotation${exportRows.length === 1 ? '' : 's'}`,
+    mobile: '',
+    quotationType: '',
+    status: '',
+    total: sums.total,
+    paid: sums.paid,
+    pending: sums.pending,
+    paymentStatus: '',
+    createdAt: '',
+  };
+
   if (format === 'csv') {
-    return exportToCsv(res, { filename: 'quotations.csv', columns, rows: dataRows });
+    return exportToCsv(res, { filename: 'quotations.csv', columns, rows: [...dataRows, totalsRow] });
   }
   if (format === 'pdf') {
     // PDF-specific layout: measured point widths and right-aligned, formatted money columns
     const fmt = (n) => (n === '' || n === null || n === undefined ? '' : Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    const fmtRow = (r) => ({ ...r, total: fmt(r.total), paid: fmt(r.paid), pending: fmt(r.pending) });
     return exportListToPdf(res, {
       filename: 'quotations.pdf',
       title: 'Quotations',
@@ -417,7 +434,8 @@ const exportExcel = asyncHandler(async (req, res) => {
         { header: 'Payment', key: 'paymentStatus', width: 46 },
         { header: 'Created', key: 'createdAt', width: 46 },
       ],
-      rows: dataRows.map((r) => ({ ...r, total: fmt(r.total), paid: fmt(r.paid), pending: fmt(r.pending) })),
+      rows: [...dataRows.map(fmtRow), fmtRow(totalsRow)],
+      boldLastRow: true,
     });
   }
 
@@ -425,7 +443,8 @@ const exportExcel = asyncHandler(async (req, res) => {
     filename: 'quotations.xlsx',
     sheetName: 'Quotations',
     columns,
-    rows: dataRows,
+    rows: [...dataRows, totalsRow],
+    boldLastRow: true,
   });
 });
 

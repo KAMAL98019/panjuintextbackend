@@ -10,7 +10,7 @@ const CELL_PAD = 5;
  * Row heights are measured per row so long values wrap inside their cell instead of
  * spilling over the row border.
  */
-function exportListToPdf(res, { filename, title, columns, rows }) {
+function exportListToPdf(res, { filename, title, columns, rows, boldLastRow }) {
   const doc = new PDFDocument({ size: 'A4', margin: MARGIN });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -61,8 +61,10 @@ function exportListToPdf(res, { filename, title, columns, rows }) {
   drawHeaderRow();
 
   rows.forEach((row, idx) => {
+    const isTotalsRow = boldLastRow && idx === rows.length - 1;
     const cells = columns.map((col) => row[col.key]);
-    const height = measureRow(cells, 'Helvetica', 8);
+    const font = isTotalsRow ? 'Helvetica-Bold' : 'Helvetica';
+    const height = measureRow(cells, font, 8);
 
     if (doc.y + height > PAGE_HEIGHT - BOTTOM_MARGIN) {
       doc.addPage();
@@ -71,7 +73,7 @@ function exportListToPdf(res, { filename, title, columns, rows }) {
     }
 
     const y = doc.y;
-    doc.rect(MARGIN, y, tableWidth, height).fill(idx % 2 === 0 ? '#ffffff' : '#f2f2f2');
+    doc.rect(MARGIN, y, tableWidth, height).fill(isTotalsRow ? '#e8ebf5' : idx % 2 === 0 ? '#ffffff' : '#f2f2f2');
     doc.strokeColor(BORDER).lineWidth(0.5).rect(MARGIN, y, tableWidth, height).stroke();
 
     // vertical separators
@@ -83,7 +85,7 @@ function exportListToPdf(res, { filename, title, columns, rows }) {
       x += col.width;
     });
 
-    drawCells(cells, y, height, { font: 'Helvetica', size: 8, color: '#000000' });
+    drawCells(cells, y, height, { font, size: 8, color: '#000000' });
     doc.y = y + height;
   });
 

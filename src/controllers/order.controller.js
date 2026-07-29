@@ -103,9 +103,10 @@ const update = asyncHandler(async (req, res) => {
  * Post-confirmation amount correction: moves the quotation's live total up or down (logged as a
  * QuotationRevision, same trail as pre-confirmation bargaining) without touching the quotation's
  * own status. Covers both a settlement discount (writing off a remaining balance after work is
- * done) and fixing a mistaken figure back up — a reason is mandatory either way. Re-derives
- * paid/pending/status against the new total so the order advances to FullyPaid when the balance
- * clears, or steps back out of FullyPaid if a correction reopens a balance.
+ * done) and fixing a mistaken figure back up. Reason is optional — falls back to a generic label
+ * so the revision history entry still reads sensibly. Re-derives paid/pending/status against the
+ * new total so the order advances to FullyPaid when the balance clears, or steps back out of
+ * FullyPaid if a correction reopens a balance.
  */
 const correctAmount = asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
@@ -118,7 +119,7 @@ const correctAmount = asyncHandler(async (req, res) => {
   await quotationRepository.addRevision(existing.quotationId, {
     previousAmount: existing.quotation.total,
     newAmount,
-    reason,
+    reason: reason || 'Amount correction',
     remarks,
     newStatus: existing.quotation.status,
   });
