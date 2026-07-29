@@ -3,7 +3,7 @@ const ApiError = require('../utils/ApiError');
 const orderRepository = require('../repositories/order.repository');
 const quotationRepository = require('../repositories/quotation.repository');
 const notificationRepository = require('../repositories/notification.repository');
-const { computePaymentStatus, nextOrderStatusAfterPayment } = require('../services/paymentStatus');
+const { computePaymentStatus, syncOrderStatusForAmountChange } = require('../services/paymentStatus');
 
 const ORDER_TIMELINE = [
   'QuotationCreated', 'Sent', 'Negotiation', 'Confirmed', 'AdvancePaid',
@@ -100,13 +100,14 @@ const update = asyncHandler(async (req, res) => {
 });
 
 /**
- * Post-confirmation settlement discount: lowers the quotation's live total (logged as a
+ * Post-confirmation amount correction: moves the quotation's live total up or down (logged as a
  * QuotationRevision, same trail as pre-confirmation bargaining) without touching the quotation's
- * own status. Lets the owner write off a remaining balance after work is done — e.g. "call the
- * final payment done" — and re-derives paid/pending/status against the new total so the order
- * auto-advances to FullyPaid when the discount clears the outstanding balance.
+ * own status. Covers both a settlement discount (writing off a remaining balance after work is
+ * done) and fixing a mistaken figure back up — a reason is mandatory either way. Re-derives
+ * paid/pending/status against the new total so the order advances to FullyPaid when the balance
+ * clears, or steps back out of FullyPaid if a correction reopens a balance.
  */
-const applyDiscount = asyncHandler(async (req, res) => {
+const correctAmount = asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   const newAmount = Number(req.body.newAmount);
   const { reason, remarks } = req.body;
@@ -114,22 +115,17 @@ const applyDiscount = asyncHandler(async (req, res) => {
   const existing = await orderRepository.findById(id);
   if (!existing) throw new ApiError(404, 'Order not found');
 
-  const currentTotal = existing.quotation.total;
-  if (newAmount >= currentTotal) {
-    throw new ApiError(400, `Discounted amount must be less than the current total of ${currentTotal}`);
-  }
-
   await quotationRepository.addRevision(existing.quotationId, {
-    previousAmount: currentTotal,
+    previousAmount: existing.quotation.total,
     newAmount,
-    reason: reason || 'Settlement discount',
+    reason,
     remarks,
     newStatus: existing.quotation.status,
   });
 
   let order = await orderRepository.findById(id);
   const { paid, pending } = computePaymentStatus(order.quotation.total, order.payments);
-  const nextStatus = nextOrderStatusAfterPayment(order.currentStatus, pending, paid);
+  const nextStatus = syncOrderStatusForAmountChange(order.currentStatus, pending, paid);
   if (nextStatus !== order.currentStatus) {
     order = await orderRepository.updateStatus(id, nextStatus);
   }
@@ -137,4 +133,4 @@ const applyDiscount = asyncHandler(async (req, res) => {
   res.json({ success: true, data: withPaymentInfo(order) });
 });
 
-module.exports = { list, getOne, updateStatus, updateTracking, update, applyDiscount, ORDER_TIMELINE };
+module.exports = { list, getOne, updateStatus, updateTracking, update, correctAmount, ORDER_TIMELINE };

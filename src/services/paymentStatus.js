@@ -23,4 +23,17 @@ function nextOrderStatusAfterPayment(currentStatus, pending, paidSoFar) {
   return currentStatus;
 }
 
-module.exports = { computePaymentStatus, nextOrderStatusAfterPayment };
+/**
+ * Amount corrections (unlike recording a payment) can move the balance back up as well as down —
+ * e.g. a mistaken discount gets corrected back to the real total. If that pushes a previously
+ * FullyPaid order back into having a balance, step it back to AdvancePaid/Confirmed so the badge
+ * stays honest. Manually-tracked work stages (MaterialOrdered..Completed) are never touched here.
+ */
+function syncOrderStatusForAmountChange(currentStatus, pending, paid) {
+  if (currentStatus === 'FullyPaid' && pending > 0) {
+    return paid > 0 ? 'AdvancePaid' : 'Confirmed';
+  }
+  return nextOrderStatusAfterPayment(currentStatus, pending, paid);
+}
+
+module.exports = { computePaymentStatus, nextOrderStatusAfterPayment, syncOrderStatusForAmountChange };

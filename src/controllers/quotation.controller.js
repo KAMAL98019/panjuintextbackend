@@ -11,7 +11,22 @@ const { calculateTotals } = require('../services/gstCalculator');
 const { exportToExcel } = require('../services/excelExporter');
 const { exportToCsv } = require('../services/csvExporter');
 const { exportListToPdf } = require('../pdf/listPdf');
-const { computePaymentStatus } = require('../services/paymentStatus');
+const { computePaymentStatus, syncOrderStatusForAmountChange } = require('../services/paymentStatus');
+
+/**
+ * After a post-confirmation revise changes the quotation's total, re-derive the order's
+ * paid/pending against the new total and step its tracking status accordingly (advances to
+ * FullyPaid if the balance clears, or steps back out of FullyPaid if the correction reopens one).
+ */
+async function syncOrderAfterTotalChange(quotationId) {
+  const order = await orderRepository.findByQuotationId(quotationId);
+  if (!order) return;
+  const { paid, pending } = computePaymentStatus(order.quotation.total, order.payments);
+  const nextStatus = syncOrderStatusForAmountChange(order.currentStatus, pending, paid);
+  if (nextStatus !== order.currentStatus) {
+    await orderRepository.updateStatus(order.id, nextStatus);
+  }
+}
 
 /** Initial Price = the first quoted amount before any bargaining; Final Price = the live total. */
 function withTrackingInfo(quotation) {
@@ -189,8 +204,16 @@ const revise = asyncHandler(async (req, res) => {
 
   const existing = await quotationRepository.findByIdRaw(id);
   if (!existing) throw new ApiError(404, 'Quotation not found');
-  if (['Confirmed', 'Cancelled'].includes(existing.status)) {
-    throw new ApiError(400, `Cannot revise a quotation with status ${existing.status}`);
+  if (existing.status === 'Cancelled') {
+    throw new ApiError(400, 'Cannot revise a cancelled quotation');
+  }
+
+  // Editing after the order was confirmed (items already handed to production, maybe already
+  // billed/paid) is a bigger deal than pre-confirmation bargaining, so it requires a reason and
+  // never touches the quotation's own status — only the order's tracking status is re-derived.
+  const isPostConfirmation = existing.status === 'Confirmed';
+  if (isPostConfirmation && !reason) {
+    throw new ApiError(400, 'A reason is required to edit a confirmed quotation');
   }
 
   if (Array.isArray(items) && items.length > 0) {
@@ -205,7 +228,7 @@ const revise = asyncHandler(async (req, res) => {
       newAmount: totals.total,
       reason,
       remarks,
-      newStatus: 'Revised',
+      newStatus: isPostConfirmation ? existing.status : 'Revised',
       quotationData: {
         subtotal: totals.subtotal,
         discountAmount: totals.discountAmount,
@@ -228,6 +251,7 @@ const revise = asyncHandler(async (req, res) => {
       })),
     });
 
+    if (isPostConfirmation) await syncOrderAfterTotalChange(id);
     return res.json({ success: true, data: quotation });
   }
 
@@ -236,9 +260,10 @@ const revise = asyncHandler(async (req, res) => {
     newAmount,
     reason,
     remarks,
-    newStatus: 'Revised',
+    newStatus: isPostConfirmation ? existing.status : 'Revised',
   });
 
+  if (isPostConfirmation) await syncOrderAfterTotalChange(id);
   res.json({ success: true, data: quotation });
 });
 
