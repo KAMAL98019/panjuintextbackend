@@ -13,6 +13,23 @@ const reconnectTimers = {};
 const AUTH_DIR = path.join(process.cwd(), '.wwebjs_auth');
 const PURPOSES = ['CustomerDocs', 'Greetings'];
 
+/**
+ * Puppeteer writes a SingletonLock (plus SingletonSocket/SingletonCookie) into the session's
+ * profile directory so two Chrome processes never share one profile. If that Chromium process
+ * ever died uncleanly (crash, OOM kill, a hard `pm2 restart` mid-launch) the lock is left behind,
+ * and every future launch fails immediately with "browser is already running" — forever, since
+ * nothing else ever clears it. Removing it before/after a failed launch is safe: if a browser is
+ * genuinely still running, Chromium recreates the lock on its own next launch attempt.
+ */
+function clearStaleLock(purpose) {
+  const sessionDir = path.join(AUTH_DIR, `session-${purpose}`);
+  for (const name of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+    try {
+      fs.rmSync(path.join(sessionDir, name), { force: true });
+    } catch { /* ignore — file may not exist */ }
+  }
+}
+
 // whatsapp-web.js on Windows regularly throws EBUSY (session file locks) and
 // "Execution context was destroyed" (WhatsApp Web navigating internally) as unhandled
 // rejections — without this they take the whole server down.
@@ -128,6 +145,10 @@ function buildClient(purpose) {
     } else if (msg.includes('Could not find Chrome') || msg.includes('Failed to launch') || msg.includes('Browser was not found')) {
       console.warn(`WhatsApp ${purpose}: disabled — Chrome not available on this machine`);
       persistStatus(purpose, { status: 'Disconnected', qrDataUrl: null, connectedNumber: null });
+    } else if (msg.includes('already running') || msg.includes('userDataDir')) {
+      console.warn(`WhatsApp ${purpose}: stale browser lock from a previous crash — clearing it and retrying in 5s`);
+      clearStaleLock(purpose);
+      scheduleReconnect(purpose, 5_000);
     } else {
       console.error(`WhatsApp ${purpose}: init error — ${msg}`);
       scheduleReconnect(purpose, 15_000);
@@ -150,7 +171,10 @@ function ensureClient(purpose) {
 function restoreSessions() {
   PURPOSES.forEach((purpose) => {
     const sessionDir = path.join(AUTH_DIR, `session-${purpose}`);
-    if (fs.existsSync(sessionDir)) ensureClient(purpose);
+    if (fs.existsSync(sessionDir)) {
+      clearStaleLock(purpose); // a prior crash/reboot can leave one behind before we ever launch
+      ensureClient(purpose);
+    }
   });
 }
 
@@ -160,6 +184,7 @@ async function refreshQR(purpose) {
   delete clients[purpose];
   await persistStatus(purpose, { status: 'QrPending', qrDataUrl: null, connectedNumber: null });
   if (client) await client.destroy().catch(() => {});
+  clearStaleLock(purpose); // destroy() doesn't always release the lock if the browser was already wedged
   ensureClient(purpose);
 }
 
