@@ -8,8 +8,8 @@ const COLS = [
   { key: 'desc', width: 122, align: 'left' },
   { key: 'qty', width: 54, align: 'center' },
   { key: 'unit', width: 34, align: 'center' },
-  { key: 'rate', width: 64, align: 'center' },
-  { key: 'eq', width: 12, align: 'center' },
+  { key: 'rate', width: 58, align: 'center' },   // reduced 6pt to fund wider eq column
+  { key: 'eq', width: 18, align: 'center' },     // widened: = now has 10pt usable space (was 4pt)
   { key: 'amount', width: 98, align: 'right' },
 ];
 const TABLE_WIDTH = COLS.reduce((sum, c) => sum + c.width, 0);
