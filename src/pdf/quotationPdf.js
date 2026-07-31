@@ -67,7 +67,13 @@ function drawRow(doc, cells, { bold = true, color = '#000000', bodyOnly, shiftX 
   COLS.forEach((col, idx) => {
     const cell = cells[idx];
     if (cell !== null && cell !== undefined && cell !== '') {
-      doc.text(String(cell), x + 4, y + 5, { width: col.width - 8, align: col.align });
+      // Description column stays top-aligned (can wrap to multiple lines).
+      // All other columns (qty, unit, rate, =, amount) hold a single value — vertically center them.
+      const fontSize = bold ? BOLD_SIZE : REG_SIZE;
+      const textY = col.key === 'desc'
+        ? y + 5
+        : y + Math.max(4, (rowHeight - fontSize - 2) / 2);
+      doc.text(String(cell), x + 4, textY, { width: col.width - 8, align: col.align });
     }
     if (idx < COLS.length - 1) {
       doc.moveTo(x + col.width, y).lineTo(x + col.width, y + rowHeight).stroke();
@@ -119,11 +125,14 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
   // LH.x=45 already sits just inside the physical paper's left design zone, and LH.right=390
   // stops before the pre-printed ad column on the right side of the physical sheet.
   // Do NOT shift right — a positive shiftX would push the table into the ad column.
+  // bodyTopOffset: shift body 0.5 cm (≈14pt) down on pre-printed stock so content aligns with
+  // the physical paper's content zone (which starts slightly lower than the digital artwork).
   const x = LH.x;
   const rightEdge = LH.right;
+  const bodyTopOffset = bodyOnly ? 14 : 0;
 
   // TO block (left) and QTN number/date (right), side by side like the pad
-  const blockY = LH.top + 32;
+  const blockY = LH.top + 32 + bodyTopOffset;
   doc.font('Calibri-Bold').fontSize(BOLD_SIZE).fillColor('#000000').text('TO:', x, blockY);
   doc.font('Calibri-Bold').fontSize(BOLD_SIZE);
   doc.text(customer.name, x + 32, blockY, { width: 200 });
