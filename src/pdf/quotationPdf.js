@@ -6,9 +6,9 @@ const { groupByGstRate } = require('../services/gstCalculator');
 // No header row, no HSN/GST% columns — GST appears only as grouped total lines ("GST 5%", "GST 18%").
 const COLS = [
   { key: 'desc', width: 122, align: 'left' },
-  { key: 'qty', width: 54, align: 'right' },
+  { key: 'qty', width: 54, align: 'center' },
   { key: 'unit', width: 34, align: 'center' },
-  { key: 'rate', width: 64, align: 'right' },
+  { key: 'rate', width: 64, align: 'center' },
   { key: 'eq', width: 12, align: 'center' },
   { key: 'amount', width: 98, align: 'right' },
 ];
@@ -133,9 +133,9 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
   const leftBlockEnd = doc.y;
 
   doc.font('Calibri-Bold').fontSize(BOLD_SIZE).fillColor('#000000');
-  doc.text(quotation.quotationNumber, 290 + shiftX, blockY, { width: 95, align: 'left', lineBreak: false });
+  doc.text(quotation.quotationNumber, 290, blockY, { width: 95, align: 'left', lineBreak: false });
   doc.font('Calibri').fontSize(REG_SIZE).fillColor('#222222');
-  doc.text(formatDate(quotation.createdAt), 290 + shiftX, blockY + 16, { width: 95, align: 'left', lineBreak: false });
+  doc.text(formatDate(quotation.createdAt), 290, blockY + 16, { width: 95, align: 'left', lineBreak: false });
 
   doc.y = Math.max(leftBlockEnd, blockY + 36) + 14;
 
@@ -175,29 +175,28 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
       money(item.unitPrice, { decimals: false }),
       '=',
       money(taxable),
-    ], { bodyOnly, shiftX });
+    ], { bodyOnly });
   });
 
   // Totals rows continue the same table grid
-  drawTotalsRow(doc, 'Gross Total', quotation.subtotal, { bodyOnly, shiftX });
+  drawTotalsRow(doc, 'Gross Total', quotation.subtotal, { bodyOnly });
   if (quotation.discountAmount > 0) {
-    drawTotalsRow(doc, 'Discount', -quotation.discountAmount, { color: '#000000', bodyOnly, shiftX });
+    drawTotalsRow(doc, 'Discount', -quotation.discountAmount, { color: '#000000', bodyOnly });
   }
   if (isGst) {
     groupByGstRate(quotation.items).forEach((g) => {
-      drawTotalsRow(doc, `GST ${g.rate} %`, g.taxAmount, { color: '#000000', bodyOnly, shiftX });
+      drawTotalsRow(doc, `GST ${g.rate} %`, g.taxAmount, { color: '#000000', bodyOnly });
     });
   }
 
-  drawTotalsRow(doc, 'Grand Total', quotation.total, { bodyOnly, shiftX });
+  drawTotalsRow(doc, 'Grand Total', quotation.total, { bodyOnly });
 
   doc.moveDown(1.2);
 
-  // Validity / advance note
+  // Validity / advance note — entire line in bold (label + body)
   ensureSpace(doc, 40, bodyOnly);
   doc.font('Calibri-Bold').fontSize(BOLD_SIZE).fillColor('#000000');
   doc.text('Note :  ', x, doc.y, { continued: true, width: rightEdge - x });
-  doc.font('Calibri').fontSize(REG_SIZE).fillColor('#222222');
   doc.text(
     quotation.terms ||
     `All prices quoted are valid for ${quotation.validityDays} days from the date of stated on the quotation. 70% advance for the order confirmation.`,
@@ -215,9 +214,9 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
   });
 
   doc.font('Calibri-Bold').fontSize(BOLD_SIZE);
-  doc.text('Thanks & Regards', 262 + shiftX, signY, { width: 120, align: 'center', lineBreak: false });
+  doc.text('Thanks & Regards', 262, signY, { width: 120, align: 'center', lineBreak: false });
   doc.font('Calibri').fontSize(REG_SIZE).fillColor('#222222');
-  doc.text(company?.name || 'Panju Intext', 262 + shiftX, signY + 16, { width: 120, align: 'center' });
+  doc.text(company?.name || 'Panju Intext', 262, signY + 16, { width: 120, align: 'center' });
   doc.fillColor('#000000');
 }
 
