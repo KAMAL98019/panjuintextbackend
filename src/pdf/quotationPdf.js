@@ -115,12 +115,12 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
   const isGst = quotation.quotationType === 'GST';
   drawLetterhead(doc, { bodyOnly });
 
-  // Body-only print mode has no letterhead artwork anchoring the left edge, so it gets a wider
-  // left margin than the on-artwork zone (LH.x) — otherwise the body reads as crammed against
-  // the paper edge instead of a deliberately margined printed page.
-  const shiftX = bodyOnly ? 40 : 0;
-  const x = LH.x + shiftX;
-  const rightEdge = LH.right + shiftX;
+  // Body-only print mode uses the same LH.x / LH.right margins as the normal letterhead.
+  // LH.x=45 already sits just inside the physical paper's left design zone, and LH.right=390
+  // stops before the pre-printed ad column on the right side of the physical sheet.
+  // Do NOT shift right — a positive shiftX would push the table into the ad column.
+  const x = LH.x;
+  const rightEdge = LH.right;
 
   // TO block (left) and QTN number/date (right), side by side like the pad
   const blockY = LH.top + 32;
