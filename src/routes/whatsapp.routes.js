@@ -13,9 +13,11 @@ router.get('/:purpose/templates', controller.listTemplates);
 router.post('/:purpose/templates', controller.createTemplate);
 router.put('/templates/:id', controller.updateTemplate);
 router.delete('/templates/:id', controller.removeTemplate);
+const upload = require('../middleware/upload');
+
 router.get('/:purpose/logs', controller.listLogs);
 
 router.post('/send-document', controller.sendDocument);
-router.post('/broadcast/greeting', controller.broadcastGreeting);
+router.post('/broadcast/greeting', upload.single('image'), controller.broadcastGreeting);
 
 module.exports = router;

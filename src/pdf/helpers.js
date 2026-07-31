@@ -16,9 +16,16 @@ const LH = {
   bottom: 750, // above the footer address bar
 };
 
-/** Paints the full-page letterhead artwork and positions the cursor at the top of the content zone. */
-function drawLetterhead(doc) {
-  doc.image(LETTERHEAD_PATH, 0, 0, { width: PAGE_WIDTH, height: PAGE_HEIGHT });
+/**
+ * Paints the full-page letterhead artwork and positions the cursor at the top of the content
+ * zone. Pass `bodyOnly: true` to skip the artwork entirely (cursor still lands at the same LH.top)
+ * — for printing onto pre-printed letterhead paper stock, where re-printing the design would
+ * double up on top of what's already on the physical page.
+ */
+function drawLetterhead(doc, { bodyOnly = false } = {}) {
+  if (!bodyOnly) {
+    doc.image(LETTERHEAD_PATH, 0, 0, { width: PAGE_WIDTH, height: PAGE_HEIGHT });
+  }
   doc.fillColor('#000000');
   doc.y = LH.top;
 }

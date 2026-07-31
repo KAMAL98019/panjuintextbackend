@@ -331,6 +331,7 @@ model WhatsappQueueItem {
   toNumber     String
   message      String?          @db.Text
   documentType String?          // For documents like Quotation, Memo, GST
+  mediaPath    String?          // For images/posters sent along with the greeting
   quotationId  Int?
   customerId   Int?
   billId       Int?

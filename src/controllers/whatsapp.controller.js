@@ -161,11 +161,20 @@ const sendDocument = asyncHandler(async (req, res) => {
  * count; progress is visible via GET /:purpose/logs.
  */
 const broadcastGreeting = asyncHandler(async (req, res) => {
-  const { message, customerIds, delayMs = 6000 } = req.body;
+  const { message, customerIds } = req.body;
   if (!message) throw new ApiError(422, 'message is required');
 
+  let parsedCustomerIds = customerIds;
+  if (typeof customerIds === 'string') {
+    try {
+      parsedCustomerIds = JSON.parse(customerIds);
+    } catch (e) {
+      parsedCustomerIds = undefined;
+    }
+  }
+
   const customers = await prisma.customer.findMany({
-    where: Array.isArray(customerIds) && customerIds.length > 0 ? { id: { in: customerIds.map(Number) } } : undefined,
+    where: Array.isArray(parsedCustomerIds) && parsedCustomerIds.length > 0 ? { id: { in: parsedCustomerIds.map(Number) } } : undefined,
   });
   if (customers.length === 0) throw new ApiError(422, 'No customers to send to');
 
@@ -185,6 +194,7 @@ const broadcastGreeting = asyncHandler(async (req, res) => {
       purpose: 'Greetings',
       toNumber: customer.mobile,
       message: text,
+      mediaPath: req.file ? req.file.path : null,
       customerId: customer.id,
       status: 'Pending',
       scheduledAt: new Date(now.getTime() + delayOffset)

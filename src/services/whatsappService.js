@@ -202,9 +202,9 @@ async function getStatus(purpose) {
     return { ...row, status: 'Connecting' };
   }
 
-  // Auto-refresh stale QR code if it hasn't updated in 45 seconds (WhatsApp QR expires every ~20-30s)
-  if (row.status === 'QrPending' && row.qrDataUrl && Date.now() - new Date(row.updatedAt).getTime() > 45_000) {
-    console.log(`WhatsApp ${purpose}: QR code stale (not updated for >45s). Triggering auto-refresh...`);
+  // Auto-refresh stale QR code if it hasn't updated in 3 minutes (WhatsApp QR expires every ~20-30s)
+  if (row.status === 'QrPending' && row.qrDataUrl && Date.now() - new Date(row.updatedAt).getTime() > 180_000) {
+    console.log(`WhatsApp ${purpose}: QR code stale (not updated for >3m). Triggering auto-refresh...`);
     refreshQR(purpose).catch((err) => console.error(`WhatsApp ${purpose} auto-refresh error:`, err));
     return { ...row, status: 'QrPending', qrDataUrl: null };
   }
@@ -275,7 +275,16 @@ async function processQueue() {
       console.log(`WhatsApp Queue: processing item ${nextItem.id} to ${nextItem.toNumber}...`);
 
       try {
-        if (nextItem.message) {
+        if (nextItem.mediaPath) {
+          const fullPath = path.resolve(nextItem.mediaPath);
+          if (fs.existsSync(fullPath)) {
+            const media = MessageMedia.fromFilePath(fullPath);
+            const client = requireReadyClient(nextItem.purpose);
+            await client.sendMessage(toChatId(nextItem.toNumber), media, { caption: nextItem.message || undefined });
+          } else {
+            throw new Error(`Media file not found at: ${fullPath}`);
+          }
+        } else if (nextItem.message) {
           await sendText(nextItem.purpose, nextItem.toNumber, nextItem.message);
         } else if (nextItem.documentType) {
           let quotation = null;

@@ -296,10 +296,15 @@ const downloadPdf = asyncHandler(async (req, res) => {
   doc.end();
 });
 
-/** Streams a printable pre-order quotation PDF directly from the live quotation record. */
+/**
+ * Streams a printable pre-order quotation PDF directly from the live quotation record.
+ * `?bodyOnly=1` skips the letterhead artwork — for printing onto pre-printed letterhead paper
+ * stock; the on-screen preview and WhatsApp send always request the full artwork.
+ */
 const downloadQuotationPdf = asyncHandler(async (req, res) => {
   const quotationRepository = require('../repositories/quotation.repository');
   const id = Number(req.params.id);
+  const bodyOnly = req.query.bodyOnly === '1' || req.query.bodyOnly === 'true';
   const quotation = await quotationRepository.findById(id);
   if (!quotation) throw new ApiError(404, 'Quotation not found');
 
@@ -310,7 +315,7 @@ const downloadQuotationPdf = asyncHandler(async (req, res) => {
   res.setHeader('Content-Disposition', `inline; filename="${quotation.quotationNumber}.pdf"`);
   doc.pipe(res);
 
-  renderQuotationPdf(doc, { company: settings, customer: quotation.customer, quotation });
+  renderQuotationPdf(doc, { company: settings, customer: quotation.customer, quotation, bodyOnly });
 
   doc.end();
 });
