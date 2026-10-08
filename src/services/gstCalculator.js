@@ -94,4 +94,14 @@ function groupByGstRate(items) {
     .map((g) => ({ ...g, taxableValue: round2(g.taxableValue), taxAmount: round2(g.taxAmount) }));
 }
 
-module.exports = { calculateTotals, groupByGstRate, round2 };
+/**
+ * The quotation's own Grand Total — what the quotation document says, derived from its stored
+ * item-level figures. Bargaining (re-priced items) and edits move it; post-confirmation settlement
+ * discounts / amount corrections only move the live `total` (the final amount payable), never this.
+ */
+function quotedTotalOf(quotation) {
+  const gst = quotation.quotationType === 'GST' ? quotation.gstAmount : 0;
+  return round2(quotation.subtotal - quotation.discountAmount + gst);
+}
+
+module.exports = { calculateTotals, groupByGstRate, quotedTotalOf, round2 };

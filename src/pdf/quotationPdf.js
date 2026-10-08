@@ -1,6 +1,6 @@
 const path = require('path');
 const { NAVY, LH, BANK_BLOCK, drawLetterhead, formatDate } = require('./helpers');
-const { groupByGstRate } = require('../services/gstCalculator');
+const { groupByGstRate, quotedTotalOf } = require('../services/gstCalculator');
 
 // Column layout copied from the paper quotation book: description | qty | unit | rate | = | amount.
 // No header row, no HSN/GST% columns — GST appears only as grouped total lines ("GST 5%", "GST 18%").
@@ -18,6 +18,28 @@ const ROW_HEIGHT = 22;
 // Bold = 12pt, regular = 11pt throughout — matches the reference layout.
 const BOLD_SIZE = 12;
 const REG_SIZE = 11;
+
+// Space kept free under the note for the company/bank block + "Thanks & Regards" footer.
+const FOOTER_HEIGHT = 90;
+const FOOTER_GAP = 12;
+const MIN_SCALE = 0.1;
+
+/**
+ * Table/note sizing at a given shrink factor — 1 is the pad's normal size. Cell padding shrinks
+ * faster than the text (scale²), so rows tighten up first and the font only gets small when
+ * there are genuinely a lot of items.
+ */
+function sizesFor(scale) {
+  const bold = BOLD_SIZE * scale;
+  const pad = 5 * scale * scale;
+  return {
+    bold,
+    reg: REG_SIZE * scale,
+    pad,
+    rowHeight: Math.max(ROW_HEIGHT * scale * scale, bold * 1.25 + pad * 2),
+    gap: 16 * scale * scale,
+  };
+}
 const CALIBRI = path.join(__dirname, '..', '..', 'assets', 'fonts', 'Calibri-Regular.ttf');
 const CALIBRI_BOLD = path.join(__dirname, '..', '..', 'assets', 'fonts', 'Calibri-Bold.ttf');
 
@@ -43,18 +65,21 @@ function ensureSpace(doc, needed, bodyOnly) {
   }
 }
 
-function drawRow(doc, cells, { bold = true, color = '#000000', bodyOnly, shiftX = 0 } = {}) {
-  doc.font(bold ? 'Calibri-Bold' : 'Calibri').fontSize(bold ? BOLD_SIZE : REG_SIZE);
-
-  // Row height grows with the tallest wrapped cell (long descriptions wrap onto extra lines)
-  const rowHeight = Math.max(
-    ROW_HEIGHT,
+/** Row height grows with the tallest wrapped cell (long descriptions wrap onto extra lines). */
+function measureRow(doc, cells, sz, bold = true) {
+  doc.font(bold ? 'Calibri-Bold' : 'Calibri').fontSize(bold ? sz.bold : sz.reg);
+  return Math.max(
+    sz.rowHeight,
     ...COLS.map((col, idx) => {
       const cell = cells[idx];
       if (cell === null || cell === undefined || cell === '') return 0;
-      return doc.heightOfString(String(cell), { width: col.width - 8 }) + 10;
+      return doc.heightOfString(String(cell), { width: col.width - 8 }) + sz.pad * 2;
     })
   );
+}
+
+function drawRow(doc, cells, { bold = true, color = '#000000', bodyOnly, shiftX = 0, sz = sizesFor(1) } = {}) {
+  const rowHeight = measureRow(doc, cells, sz, bold);
 
   ensureSpace(doc, rowHeight, bodyOnly);
   const y = doc.y;
@@ -69,10 +94,10 @@ function drawRow(doc, cells, { bold = true, color = '#000000', bodyOnly, shiftX 
     if (cell !== null && cell !== undefined && cell !== '') {
       // Description column stays top-aligned (can wrap to multiple lines).
       // All other columns (qty, unit, rate, =, amount) hold a single value — vertically center them.
-      const fontSize = bold ? BOLD_SIZE : REG_SIZE;
+      const fontSize = bold ? sz.bold : sz.reg;
       const textY = col.key === 'desc'
-        ? y + 5
-        : y + Math.max(4, (rowHeight - fontSize - 2) / 2);
+        ? y + sz.pad
+        : y + Math.max(sz.pad - 1, (rowHeight - fontSize - 2) / 2);
       doc.text(String(cell), x + 4, textY, { width: col.width - 8, align: col.align });
     }
     if (idx < COLS.length - 1) {
@@ -85,7 +110,9 @@ function drawRow(doc, cells, { bold = true, color = '#000000', bodyOnly, shiftX 
 }
 
 /** A totals row where the label spans the first four columns (like "Gross Total" on the paper). */
-function drawTotalsRow(doc, label, amount, { bold = true, color = NAVY, bodyOnly, shiftX = 0 } = {}) {
+function drawTotalsRow(doc, label, amount, { bold = true, color = NAVY, bodyOnly, shiftX = 0, sz = sizesFor(1) } = {}) {
+  const ROW_HEIGHT = sz.rowHeight;
+  const textY = Math.max(sz.pad - 1, (ROW_HEIGHT - (bold ? sz.bold : sz.reg) - 2) / 2);
   ensureSpace(doc, ROW_HEIGHT, bodyOnly);
   const y = doc.y;
   const x0 = LH.x + shiftX;
@@ -98,10 +125,10 @@ function drawTotalsRow(doc, label, amount, { bold = true, color = NAVY, bodyOnly
   doc.moveTo(eqX, y).lineTo(eqX, y + ROW_HEIGHT).stroke();
   doc.moveTo(amountX, y).lineTo(amountX, y + ROW_HEIGHT).stroke();
 
-  doc.font(bold ? 'Calibri-Bold' : 'Calibri').fontSize(bold ? BOLD_SIZE : REG_SIZE).fillColor(color);
-  doc.text(label, x0 + 4, y + 5, { width: labelWidth - 12, align: 'center', lineBreak: false });
-  doc.text('=', eqX + 2, y + 5, { width: COLS[4].width - 4, align: 'center', lineBreak: false });
-  doc.text(money(amount), amountX + 4, y + 5, { width: COLS[5].width - 8, align: 'right', lineBreak: false });
+  doc.font(bold ? 'Calibri-Bold' : 'Calibri').fontSize(bold ? sz.bold : sz.reg).fillColor(color);
+  doc.text(label, x0 + 4, y + textY, { width: labelWidth - 12, align: 'center', lineBreak: false });
+  doc.text('=', eqX + 2, y + textY, { width: COLS[4].width - 4, align: 'center', lineBreak: false });
+  doc.text(money(amount), amountX + 4, y + textY, { width: COLS[5].width - 8, align: 'right', lineBreak: false });
   doc.fillColor('#000000');
   doc.y = y + ROW_HEIGHT;
 }
@@ -175,47 +202,63 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
   // Item rows — exactly like the pad: description | qty | unit | rate | = | amount.
   // Row amount is the pre-tax value (qty × rate less discount): on the paper, GST appears only
   // as the grouped total lines below, so the rows must sum to the Gross Total.
-  quotation.items.forEach((item) => {
+  const itemRows = quotation.items.map((item) => {
     const taxable = item.quantity * item.unitPrice * (1 - (item.discountPercent || 0) / 100);
-    drawRow(doc, [
+    return [
       item.description,
       Number(item.quantity).toLocaleString('en-IN', { maximumFractionDigits: 2 }),
       item.unit || '',
       money(item.unitPrice, { decimals: false }),
       '=',
       money(taxable),
-    ], { bodyOnly });
+    ];
   });
+  const gstGroups = isGst ? groupByGstRate(quotation.items) : [];
+  const totalsRowCount = 2 + (quotation.discountAmount > 0 ? 1 : 0) + gstGroups.length;
+  const noteText = quotation.terms ||
+    `All prices quoted are valid for ${quotation.validityDays} days from the date of stated on the quotation. 70% advance for the order confirmation.`;
+
+  // Always one page: shrink the table + note just enough that everything fits above the footer,
+  // however many items there are (the pad's normal size whenever it already fits).
+  const available = LH.bottom - FOOTER_HEIGHT - FOOTER_GAP - doc.y;
+  const heightAt = (sz) => {
+    const rows = itemRows.reduce((sum, cells) => sum + measureRow(doc, cells, sz), 0);
+    doc.font('Calibri-Bold').fontSize(sz.bold);
+    // +1 line: the continued "Note :" label renders a line taller than heightOfString predicts
+    const note = doc.heightOfString(`Note :  ${noteText}`, { width: rightEdge - x }) + doc.currentLineHeight(true);
+    return rows + totalsRowCount * sz.rowHeight + sz.gap + note;
+  };
+  let scale = 1;
+  while (scale > MIN_SCALE && heightAt(sizesFor(scale)) > available) scale = Math.round((scale - 0.01) * 1000) / 1000;
+  const sz = sizesFor(scale);
+
+  itemRows.forEach((cells) => drawRow(doc, cells, { bodyOnly, sz }));
 
   // Totals rows continue the same table grid
-  drawTotalsRow(doc, 'Gross Total', quotation.subtotal, { bodyOnly });
+  drawTotalsRow(doc, 'Gross Total', quotation.subtotal, { bodyOnly, sz });
   if (quotation.discountAmount > 0) {
-    drawTotalsRow(doc, 'Discount', -quotation.discountAmount, { color: '#000000', bodyOnly });
+    drawTotalsRow(doc, 'Discount', -quotation.discountAmount, { color: '#000000', bodyOnly, sz });
   }
-  if (isGst) {
-    groupByGstRate(quotation.items).forEach((g) => {
-      drawTotalsRow(doc, `GST ${g.rate} %`, g.taxAmount, { color: '#000000', bodyOnly });
-    });
-  }
+  gstGroups.forEach((g) => {
+    drawTotalsRow(doc, `GST ${g.rate} %`, g.taxAmount, { color: '#000000', bodyOnly, sz });
+  });
 
-  drawTotalsRow(doc, 'Grand Total', quotation.total, { bodyOnly });
+  // The quotation's own Grand Total — settlement discounts / corrections after confirmation
+  // change only the final amount payable, never what the quotation document says.
+  drawTotalsRow(doc, 'Grand Total', quotedTotalOf(quotation), { bodyOnly, sz });
 
-  doc.moveDown(1.2);
+  doc.y += sz.gap;
 
   // Validity / advance note — entire line in bold (label + body)
-  ensureSpace(doc, 40, bodyOnly);
-  doc.font('Calibri-Bold').fontSize(BOLD_SIZE).fillColor('#000000');
+  ensureSpace(doc, 40 * scale, bodyOnly);
+  doc.font('Calibri-Bold').fontSize(sz.bold).fillColor('#000000');
   doc.text('Note :  ', x, doc.y, { continued: true, width: rightEdge - x });
-  doc.text(
-    quotation.terms ||
-    `All prices quoted are valid for ${quotation.validityDays} days from the date of stated on the quotation. 70% advance for the order confirmation.`,
-    { width: rightEdge - x }
-  );
+  doc.text(noteText, { width: rightEdge - x });
   doc.fillColor('#000000');
 
   // Footer exactly like the pad: company + bank block bottom-left, Thanks & Regards on the right
-  ensureSpace(doc, 100, bodyOnly);
-  const signY = Math.min(doc.y + 30, LH.bottom - 90);
+  ensureSpace(doc, FOOTER_HEIGHT + FOOTER_GAP, bodyOnly);
+  const signY = Math.min(doc.y + 30, LH.bottom - FOOTER_HEIGHT);
   doc.font('Calibri-Bold').fontSize(BOLD_SIZE).fillColor('#000000');
   doc.text((company?.name || 'Panju Intext').toUpperCase(), x, signY, { width: 200 });
   BANK_BLOCK.forEach((line, idx) => {

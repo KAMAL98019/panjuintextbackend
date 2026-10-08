@@ -6,7 +6,7 @@ const settingsRepository = require('../repositories/settings.repository');
 const orderRepository = require('../repositories/order.repository');
 const notificationRepository = require('../repositories/notification.repository');
 const { generateQuotationNumber, generateOrderNumber, generateCustomerCode } = require('../services/numberGenerator');
-const { calculateTotals } = require('../services/gstCalculator');
+const { calculateTotals, quotedTotalOf } = require('../services/gstCalculator');
 const { exportToExcel } = require('../services/excelExporter');
 const { exportToCsv } = require('../services/csvExporter');
 const { exportListToPdf } = require('../pdf/listPdf');
@@ -27,9 +27,12 @@ async function syncOrderAfterTotalChange(quotationId) {
   }
 }
 
-/** Initial Price = the first quoted amount before any bargaining; Final Price = the live total. */
+/**
+ * Initial Price = the quotation's own Grand Total (after any pre-confirmation bargaining);
+ * Final Price = the live total, which settlement discounts / corrections move after confirmation.
+ */
 function withTrackingInfo(quotation) {
-  const initialPrice = quotation.revisions?.[0]?.previousAmount ?? quotation.total;
+  const initialPrice = quotedTotalOf(quotation);
   const paymentInfo = quotation.order
     ? computePaymentStatus(quotation.total, quotation.order.payments)
     : null;
@@ -94,9 +97,10 @@ const getOne = asyncHandler(async (req, res) => {
   const quotation = await quotationRepository.findById(Number(req.params.id));
   if (!quotation) throw new ApiError(404, 'Quotation not found');
 
+  const withQuoted = { ...quotation, quotedTotal: quotedTotalOf(quotation) };
   const data = quotation.order
-    ? { ...quotation, order: { ...quotation.order, paymentInfo: computePaymentStatus(quotation.total, quotation.order.payments) } }
-    : quotation;
+    ? { ...withQuoted, order: { ...quotation.order, paymentInfo: computePaymentStatus(quotation.total, quotation.order.payments) } }
+    : withQuoted;
 
   res.json({ success: true, data });
 });
@@ -147,9 +151,12 @@ const update = asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   const existing = await quotationRepository.findByIdRaw(id);
   if (!existing) throw new ApiError(404, 'Quotation not found');
-  if (['Confirmed', 'Cancelled'].includes(existing.status)) {
-    throw new ApiError(400, `Cannot edit a quotation with status ${existing.status}`);
+  if (existing.status === 'Cancelled') {
+    throw new ApiError(400, 'Cannot edit a cancelled quotation');
   }
+
+  // A confirmed quotation stays Confirmed when edited — its order, payments and bills hang off it.
+  const isPostConfirmation = existing.status === 'Confirmed';
 
   const { customerId, quotationType, items, remarks, terms, validityDays, expectedDelivery, status } = req.body;
   const { totals } = await computeQuotationTotals({
@@ -158,11 +165,11 @@ const update = asyncHandler(async (req, res) => {
     items,
   });
 
-  const quotation = await quotationRepository.updateWithItems(id, {
+  const payload = {
     quotationData: {
       customerId: customerId || existing.customerId,
       quotationType: quotationType || existing.quotationType,
-      status: status || existing.status,
+      status: isPostConfirmation ? existing.status : status || existing.status,
       subtotal: totals.subtotal,
       discountAmount: totals.discountAmount,
       cgst: totals.cgst,
@@ -186,8 +193,23 @@ const update = asyncHandler(async (req, res) => {
       gstPercent: item.gstPercent || 0,
       amount: item.amount,
     })),
-  });
+  };
 
+  // A post-confirmation edit that moves the total is logged in the revision trail (old amount is
+  // never lost) and the order's paid/pending + tracking status are re-derived against the new total.
+  if (isPostConfirmation && totals.total !== existing.total) {
+    const quotation = await quotationRepository.reviseWithItems(id, {
+      ...payload,
+      previousAmount: existing.total,
+      newAmount: totals.total,
+      reason: 'Edited after confirmation',
+      newStatus: existing.status,
+    });
+    await syncOrderAfterTotalChange(id);
+    return res.json({ success: true, data: quotation });
+  }
+
+  const quotation = await quotationRepository.updateWithItems(id, payload);
   res.json({ success: true, data: quotation });
 });
 
@@ -374,7 +396,8 @@ const exportExcel = asyncHandler(async (req, res) => {
     { header: 'Mobile', key: 'mobile', width: 14 },
     { header: 'Type', key: 'quotationType', width: 9 },
     { header: 'Status', key: 'status', width: 14 },
-    { header: 'Total', key: 'total', width: 12 },
+    { header: 'Initial Price', key: 'initialPrice', width: 13 },
+    { header: 'Final Price', key: 'total', width: 12 },
     { header: 'Paid', key: 'paid', width: 12 },
     { header: 'Pending', key: 'pending', width: 12 },
     { header: 'Payment Status', key: 'paymentStatus', width: 14 },
@@ -386,6 +409,7 @@ const exportExcel = asyncHandler(async (req, res) => {
     mobile: q.customer.mobile,
     quotationType: q.quotationType,
     status: q.status,
+    initialPrice: q.initialPrice,
     total: q.total,
     paid: q.paymentInfo ? q.paymentInfo.paid : '',
     pending: q.paymentInfo ? q.paymentInfo.pending : '',
@@ -395,16 +419,18 @@ const exportExcel = asyncHandler(async (req, res) => {
 
   // Summary row reflecting exactly what's being exported (same filtered set as the on-screen list).
   const sums = exportRows.reduce((acc, q) => ({
+    initialPrice: acc.initialPrice + (q.initialPrice || 0),
     total: acc.total + (q.total || 0),
     paid: acc.paid + (q.paymentInfo ? q.paymentInfo.paid : 0),
     pending: acc.pending + (q.paymentInfo ? q.paymentInfo.pending : 0),
-  }), { total: 0, paid: 0, pending: 0 });
+  }), { initialPrice: 0, total: 0, paid: 0, pending: 0 });
   const totalsRow = {
     quotationNumber: 'TOTAL',
     customerName: `${exportRows.length} quotation${exportRows.length === 1 ? '' : 's'}`,
     mobile: '',
     quotationType: '',
     status: '',
+    initialPrice: sums.initialPrice,
     total: sums.total,
     paid: sums.paid,
     pending: sums.pending,
@@ -418,21 +444,22 @@ const exportExcel = asyncHandler(async (req, res) => {
   if (format === 'pdf') {
     // PDF-specific layout: measured point widths and right-aligned, formatted money columns
     const fmt = (n) => (n === '' || n === null || n === undefined ? '' : Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-    const fmtRow = (r) => ({ ...r, total: fmt(r.total), paid: fmt(r.paid), pending: fmt(r.pending) });
+    const fmtRow = (r) => ({ ...r, initialPrice: fmt(r.initialPrice), total: fmt(r.total), paid: fmt(r.paid), pending: fmt(r.pending) });
     return exportListToPdf(res, {
       filename: 'quotations.pdf',
       title: 'Quotations',
       columns: [
-        { header: 'Quotation No', key: 'quotationNumber', width: 66 },
-        { header: 'Customer', key: 'customerName', width: 76 },
-        { header: 'Mobile', key: 'mobile', width: 50 },
-        { header: 'Type', key: 'quotationType', width: 32 },
-        { header: 'Status', key: 'status', width: 50 },
-        { header: 'Total', key: 'total', width: 50, align: 'right' },
+        { header: 'Quotation No', key: 'quotationNumber', width: 56 },
+        { header: 'Customer', key: 'customerName', width: 61 },
+        { header: 'Mobile', key: 'mobile', width: 46 },
+        { header: 'Type', key: 'quotationType', width: 28 },
+        { header: 'Status', key: 'status', width: 46 },
+        { header: 'Initial Price', key: 'initialPrice', width: 50, align: 'right' },
+        { header: 'Final Price', key: 'total', width: 50, align: 'right' },
         { header: 'Paid', key: 'paid', width: 46, align: 'right' },
         { header: 'Pending', key: 'pending', width: 50, align: 'right' },
-        { header: 'Payment', key: 'paymentStatus', width: 46 },
-        { header: 'Created', key: 'createdAt', width: 46 },
+        { header: 'Payment', key: 'paymentStatus', width: 40 },
+        { header: 'Created', key: 'createdAt', width: 42 },
       ],
       rows: [...dataRows.map(fmtRow), fmtRow(totalsRow)],
       boldLastRow: true,
