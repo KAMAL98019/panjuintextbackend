@@ -1,14 +1,13 @@
 const { body } = require('express-validator');
 
-/** Either an existing customerId, or an inline customer object to create/reuse (matched by mobile).
- * Only name/mobile/address are required — city/state/pincode default server-side (state falls back
- * to the company's own state, keeping GST intra-state by default). */
+/** Either an existing customerId, or an inline customer object to create/reuse (matched by mobile
+ * when one is given). Every new-customer field is optional — a walk-in quote can be written before
+ * the name/phone/address are known; state falls back to the company's own (GST stays intra-state). */
 const customerReference = [
   body().custom((value) => {
     if (value.customerId) return true;
-    const c = value.customer;
-    if (!c || !c.name || !c.mobile || !c.address) {
-      throw new Error('Provide an existing customerId or new-customer details (name, mobile, address)');
+    if (value.customer !== undefined && (typeof value.customer !== 'object' || value.customer === null)) {
+      throw new Error('customer must be an object of new-customer details');
     }
     return true;
   }),

@@ -173,10 +173,14 @@ const broadcastGreeting = asyncHandler(async (req, res) => {
     }
   }
 
+  // Customers saved without a phone number (allowed on quotations) can't receive WhatsApp — skip them
   const customers = await prisma.customer.findMany({
-    where: Array.isArray(parsedCustomerIds) && parsedCustomerIds.length > 0 ? { id: { in: parsedCustomerIds.map(Number) } } : undefined,
+    where: {
+      ...(Array.isArray(parsedCustomerIds) && parsedCustomerIds.length > 0 ? { id: { in: parsedCustomerIds.map(Number) } } : {}),
+      mobile: { not: '' },
+    },
   });
-  if (customers.length === 0) throw new ApiError(422, 'No customers to send to');
+  if (customers.length === 0) throw new ApiError(422, 'No customers with a phone number to send to');
 
   // Push all to the database queue in batches of 5 with a cooldown!
   const now = new Date();

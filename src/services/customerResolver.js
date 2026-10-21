@@ -8,21 +8,26 @@ const { generateCustomerCode } = require('./numberGenerator');
  * inline — so admins can capture a first-time walk-in's details directly on the form, matching
  * how the paper books work (name/phone/address written straight onto the document).
  */
-async function resolveOrCreateCustomer({ customerId, customer }) {
+async function resolveOrCreateCustomer({ customerId, customer = {} }) {
   if (customerId) return Number(customerId);
 
-  const existing = await customerRepository.findByMobile(customer.mobile);
-  if (existing) return existing.id;
+  // Name/phone/address are all optional on the quotation form. Only a real phone number identifies
+  // a repeat customer — a blank one must never match another customer who also has no phone.
+  const mobile = String(customer.mobile || '').trim();
+  if (mobile) {
+    const existing = await customerRepository.findByMobile(mobile);
+    if (existing) return existing.id;
+  }
 
   const settings = await settingsRepository.get();
   const customerCode = await generateCustomerCode(settings?.customerPrefix || 'CUS');
   const created = await customerRepository.create({
     customerCode,
-    name: customer.name,
-    mobile: customer.mobile,
+    name: String(customer.name || '').trim(),
+    mobile,
     altMobile: customer.altMobile || null,
     email: customer.email || null,
-    address: customer.address,
+    address: customer.address || '',
     // City/state/pincode are optional on the forms; state defaults to the company's own state
     // so GST stays intra-state (CGST/SGST) unless explicitly told otherwise.
     city: customer.city || '',

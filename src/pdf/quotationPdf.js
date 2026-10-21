@@ -162,10 +162,12 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
   const blockY = LH.top + 32 + bodyTopOffset;
   doc.font('Calibri-Bold').fontSize(BOLD_SIZE).fillColor('#000000').text('TO:', x, blockY);
   doc.font('Calibri-Bold').fontSize(BOLD_SIZE);
-  doc.text(customer.name, x + 32, blockY, { width: 200 });
+  doc.text(customer.name || ' ', x + 32, blockY, { width: 200 });
   doc.font('Calibri').fontSize(REG_SIZE).fillColor('#222222');
-  doc.text([customer.address, `${customer.city}${customer.pincode ? ' - ' + customer.pincode : ''}`].filter(Boolean).join('\n'), x + 32, doc.y + 1, { width: 200 });
-  doc.text(`ph.no: ${customer.mobile}`, x + 32, doc.y + 1, { width: 200 });
+  // Address and phone are optional on the quotation form — print only the lines that were filled in
+  const addressText = [customer.address, `${customer.city || ''}${customer.pincode ? ' - ' + customer.pincode : ''}`].filter(Boolean).join('\n');
+  if (addressText) doc.text(addressText, x + 32, doc.y + 1, { width: 200 });
+  if (customer.mobile) doc.text(`ph.no: ${customer.mobile}`, x + 32, doc.y + 1, { width: 200 });
   const leftBlockEnd = doc.y;
 
   doc.font('Calibri-Bold').fontSize(BOLD_SIZE).fillColor('#000000');
