@@ -1,9 +1,10 @@
 const path = require('path');
-const { NAVY, LH, BANK_BLOCK, drawLetterhead, formatDate, isLumpSumLine } = require('./helpers');
+const { NAVY, LH, BANK_BLOCK, drawLetterhead, isLumpSumLine } = require('./helpers');
 const { groupByGstRate, quotedTotalOf } = require('../services/gstCalculator');
 
 // Column layout copied from the paper quotation book: description | qty | unit | rate | = | amount.
-// No header row, no HSN/GST% columns — GST appears only as grouped total lines ("GST 5%", "GST 18%").
+// A column-name header row heads the table (repeated on a continuation page); no HSN/GST% columns —
+// GST appears only as grouped total lines ("GST 5%", "GST 18%").
 const COLS = [
   { key: 'desc', width: 122, align: 'left' },
   { key: 'qty', width: 54, align: 'center' },
@@ -14,6 +15,8 @@ const COLS = [
 ];
 const TABLE_WIDTH = COLS.reduce((sum, c) => sum + c.width, 0);
 const ROW_HEIGHT = 22;
+const HEADER_CELLS = ['Description', 'Qty', 'Unit', 'Rate', '', 'Amount'];
+const HEADER_FILL = '#e8ecf5';
 
 // Right edge of the QT number/date block — just left of the header curve at that height
 const QT_RIGHT = 488;
@@ -53,6 +56,12 @@ function registerFonts(doc) {
   doc.registerFont('Calibri-Bold', CALIBRI_BOLD);
 }
 
+/** Pad-style date: 21.10.2026 */
+function dotDate(date) {
+  const d = new Date(date || Date.now());
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+}
+
 function money(n, { decimals = true } = {}) {
   const num = Number(n || 0);
   const opts = decimals
@@ -82,13 +91,14 @@ function measureRow(doc, cells, sz, bold = true) {
   );
 }
 
-function drawRow(doc, cells, { bold = true, color = '#000000', bodyOnly, shiftX = 0, sz = sizesFor(1) } = {}) {
+function drawRow(doc, cells, { bold = true, color = '#000000', fill, bodyOnly, shiftX = 0, sz = sizesFor(1) } = {}) {
   const rowHeight = measureRow(doc, cells, sz, bold);
 
   ensureSpace(doc, rowHeight, bodyOnly);
   const y = doc.y;
   let x = LH.x + shiftX;
 
+  if (fill) doc.save().rect(LH.x + shiftX, y, TABLE_WIDTH, rowHeight).fill(fill).restore();
   doc.strokeColor('#8a8a8a').lineWidth(0.6);
   doc.rect(LH.x + shiftX, y, TABLE_WIDTH, rowHeight).stroke();
 
@@ -162,30 +172,37 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
   const rightEdge = LH.right;
   const bodyTopOffset = bodyOnly ? 14 : 0;
 
-  // TO block (left) and QTN number/date (right), side by side like the pad
+  // TO block like the pad: "TO:" on its own line, the customer's name/address indented below it;
+  // QTN number + date as a centred pair at the top-right, just inside the letterhead's curve.
   const blockY = LH.top + 32 + bodyTopOffset;
   doc.font('Calibri-Bold').fontSize(BOLD_SIZE).fillColor('#000000').text('TO:', x, blockY);
-  doc.font('Calibri-Bold').fontSize(BOLD_SIZE);
-  doc.text(customer.name || ' ', x + 32, blockY, { width: 200 });
+  doc.text(customer.name || ' ', x + 32, blockY + 18, { width: 220 });
   doc.font('Calibri').fontSize(REG_SIZE).fillColor('#222222');
   // Address and phone are optional on the quotation form — print only the lines that were filled in
   const addressText = [customer.address, `${customer.city || ''}${customer.pincode ? ' - ' + customer.pincode : ''}`].filter(Boolean).join('\n');
-  if (addressText) doc.text(addressText, x + 32, doc.y + 1, { width: 200 });
-  if (customer.mobile) doc.text(`ph.no: ${customer.mobile}`, x + 32, doc.y + 1, { width: 200 });
+  if (addressText) doc.text(addressText, x + 32, doc.y + 1, { width: 220 });
+  if (customer.mobile) doc.text(`ph.no: ${customer.mobile}`, x + 32, doc.y + 1, { width: 220 });
   const leftBlockEnd = doc.y;
 
   doc.font('Calibri-Bold').fontSize(BOLD_SIZE).fillColor('#000000');
-  // QT number + date sit at the top-right, ending just inside the letterhead's curve (QT_RIGHT)
-  doc.text(quotation.quotationNumber, QT_RIGHT - QT_WIDTH, blockY, { width: QT_WIDTH, align: 'right', lineBreak: false });
+  doc.text(quotation.quotationNumber, QT_RIGHT - QT_WIDTH, blockY, { width: QT_WIDTH, align: 'center', lineBreak: false });
   doc.font('Calibri').fontSize(REG_SIZE).fillColor('#222222');
-  doc.text(formatDate(quotation.createdAt), QT_RIGHT - QT_WIDTH, blockY + 16, { width: QT_WIDTH, align: 'right', lineBreak: false });
+  doc.text(dotDate(quotation.createdAt), QT_RIGHT - QT_WIDTH, blockY + 16, { width: QT_WIDTH, align: 'center', lineBreak: false });
 
-  doc.y = Math.max(leftBlockEnd, blockY + 36) + 14;
+  doc.y = Math.max(leftBlockEnd, blockY + 36) + 18;
 
-  // SUB line
+  // SUB line — the work type is bold, like "Quotation for **Wallpaper & Blinds** reg." on the pad
+  const subject = quotation.remarks || 'Quotation for interior furnishing works';
+  const subParts = subject.match(/^(Quotation for\s+)(.+?)(\s+reg\.?)?$/i);
   doc.font('Calibri-Bold').fontSize(BOLD_SIZE).fillColor('#000000');
   doc.text('SUB:  ', x, doc.y, { continued: true, width: rightEdge - x });
-  doc.font('Calibri').fontSize(REG_SIZE).text(quotation.remarks || 'Quotation for interior furnishing works', { width: rightEdge - x });
+  if (subParts) {
+    doc.font('Calibri').fontSize(REG_SIZE).text(subParts[1], { continued: true });
+    doc.font('Calibri-Bold').fontSize(REG_SIZE).text(subParts[2], { continued: !!subParts[3] });
+    if (subParts[3]) doc.font('Calibri').fontSize(REG_SIZE).text(subParts[3]);
+  } else {
+    doc.font('Calibri').fontSize(REG_SIZE).text(subject, { width: rightEdge - x });
+  }
   doc.moveDown(1);
 
   // Greeting
@@ -233,7 +250,7 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
     doc.font('Calibri-Bold').fontSize(sz.bold);
     // +1 line: the continued "Note :" label renders a line taller than heightOfString predicts
     const note = doc.heightOfString(`Note :  ${noteText}`, { width: rightEdge - x }) + doc.currentLineHeight(true);
-    return rows + totalsRowCount * sz.rowHeight + sz.gap + note;
+    return measureRow(doc, HEADER_CELLS, sz) + rows + totalsRowCount * sz.rowHeight + sz.gap + note;
   };
   let scale = 1;
   while (scale > MIN_SCALE && heightAt(sizesFor(scale)) > available) scale = Math.round((scale - 0.01) * 1000) / 1000;
@@ -249,19 +266,23 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
     doc.font('Calibri-Bold').fontSize(sz.bold);
     const noteHeight = doc.heightOfString(`Note :  ${noteText}`, { width: rightEdge - x }) + doc.currentLineHeight(true);
     const tailHeight = totalsRowCount * sz.rowHeight + sz.gap + noteHeight + FOOTER_GAP + FOOTER_HEIGHT;
-    let y = doc.y;
+    const headerHeight = measureRow(doc, HEADER_CELLS, sz);
+    let y = doc.y + headerHeight;
     itemRows.forEach((cells, idx) => {
       const h = measureRow(doc, cells, sz);
-      if (y + h > LH.bottom) { pageBreaks.add(idx); y = LH.top; }
+      if (y + h > LH.bottom) { pageBreaks.add(idx); y = LH.top + headerHeight; }
       y += h;
     });
     if (y + tailHeight > LH.bottom && itemRows.length > 0) pageBreaks.add(itemRows.length - 1);
   }
 
+  const drawHeader = () => drawRow(doc, HEADER_CELLS, { color: NAVY, fill: HEADER_FILL, bodyOnly, sz });
+  drawHeader();
   itemRows.forEach((cells, idx) => {
     if (pageBreaks.has(idx)) {
       doc.addPage();
       drawLetterhead(doc, { bodyOnly });
+      drawHeader(); // column names repeat on the continuation page
     }
     drawRow(doc, cells, { bodyOnly, sz });
   });
