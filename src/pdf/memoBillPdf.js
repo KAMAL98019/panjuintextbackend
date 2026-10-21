@@ -1,5 +1,5 @@
 const path = require('path');
-const { formatDate } = require('./helpers');
+const { formatDate, isLumpSumLine } = require('./helpers');
 
 const PAGE_W = 595.28;
 const PAGE_H = 841.89;
@@ -55,7 +55,7 @@ function renderMemoBillPdf(doc, { customer, quotation, bill, paymentInfo, custom
     const desc = item.description || '';
     const rowH = Math.max(14, doc.heightOfString(desc, { width: X(cols[1].w) - 6 }) + 5);
     if (rowY + rowH > bodyBottom) return; // single sheet, like the real pad
-    const cells = [String(idx + 1), desc, item.shadeCode || item.hsnCode || '', `${item.quantity ?? ''}`, money(item.unitPrice), money(item.amount)];
+    const cells = [String(idx + 1), desc, item.shadeCode || item.hsnCode || '', isLumpSumLine(item) ? '' : `${item.quantity ?? ''}`, money(item.unitPrice), money(item.amount)];
     cols.forEach((c, ci) => {
       doc.text(cells[ci], X(c.x) + 3, rowY, { width: X(c.w) - 6, align: c.align });
     });

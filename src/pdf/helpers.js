@@ -186,7 +186,16 @@ function drawFootNote(doc, text) {
   doc.fillColor('#000000');
 }
 
+/**
+ * Lump-sum lines (e.g. "Transport") are entered with a blank Qty and saved as quantity 1 with no
+ * unit — documents print their Qty/Unit cells blank; the Rate/amount carries the whole value.
+ */
+function isLumpSumLine(item) {
+  return Number(item.quantity) === 1 && !String(item.unit || '').trim();
+}
+
 module.exports = {
+  isLumpSumLine,
   PAGE_WIDTH,
   PAGE_HEIGHT,
   MARGIN,

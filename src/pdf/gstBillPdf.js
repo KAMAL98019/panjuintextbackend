@@ -1,5 +1,5 @@
 const path = require('path');
-const { formatDate } = require('./helpers');
+const { formatDate, isLumpSumLine } = require('./helpers');
 const { amountToIndianWords } = require('../services/amountInWords');
 
 const PAGE_W = 595.28;
@@ -70,7 +70,7 @@ function renderGstBillPdf(doc, { customer, quotation, bill, customFields = {} })
     const rowH = Math.max(14, doc.heightOfString(desc, { width: X(cols[2].w) - 6 }) + 5);
     if (rowY + rowH > bodyBottom) return; // single sheet, like the real pad
     const [rs, ps] = rsPs(item.taxableValue ?? item.amount);
-    const cells = [String(idx + 1), item.hsnCode || '', desc, `${item.quantity ?? ''}`, money(item.unitPrice), rs, ps];
+    const cells = [String(idx + 1), item.hsnCode || '', desc, isLumpSumLine(item) ? '' : `${item.quantity ?? ''}`, money(item.unitPrice), rs, ps];
     cols.forEach((c, ci) => {
       doc.text(cells[ci], X(c.x) + 3, rowY, { width: X(c.w) - 6, align: c.align });
     });

@@ -1,5 +1,5 @@
 const path = require('path');
-const { NAVY, LH, BANK_BLOCK, drawLetterhead, formatDate } = require('./helpers');
+const { NAVY, LH, BANK_BLOCK, drawLetterhead, formatDate, isLumpSumLine } = require('./helpers');
 const { groupByGstRate, quotedTotalOf } = require('../services/gstCalculator');
 
 // Column layout copied from the paper quotation book: description | qty | unit | rate | = | amount.
@@ -15,6 +15,10 @@ const COLS = [
 const TABLE_WIDTH = COLS.reduce((sum, c) => sum + c.width, 0);
 const ROW_HEIGHT = 22;
 
+// Right edge of the QT number/date block — just left of the header curve at that height
+const QT_RIGHT = 488;
+const QT_WIDTH = 120;
+
 // Bold = 12pt, regular = 11pt throughout — matches the reference layout.
 const BOLD_SIZE = 12;
 const REG_SIZE = 11;
@@ -22,22 +26,22 @@ const REG_SIZE = 11;
 // Space kept free under the note for the company/bank block + "Thanks & Regards" footer.
 const FOOTER_HEIGHT = 90;
 const FOOTER_GAP = 12;
-const MIN_SCALE = 0.1;
+// Tightest row spacing allowed before items continue on a second letterhead page.
+const MIN_SCALE = 0.3;
 
 /**
- * Table/note sizing at a given shrink factor — 1 is the pad's normal size. Cell padding shrinks
- * faster than the text (scale²), so rows tighten up first and the font only gets small when
- * there are genuinely a lot of items.
+ * Table spacing at a given tightness — 1 is the pad's normal layout. Text always stays at the
+ * normal 12/11pt size; only the cell padding / row height tightens so more items fit on page 1.
+ * Beyond the tightest spacing, rows simply continue onto a second letterhead page.
  */
 function sizesFor(scale) {
-  const bold = BOLD_SIZE * scale;
-  const pad = 5 * scale * scale;
+  const pad = 5 * scale;
   return {
-    bold,
-    reg: REG_SIZE * scale,
+    bold: BOLD_SIZE,
+    reg: REG_SIZE,
     pad,
-    rowHeight: Math.max(ROW_HEIGHT * scale * scale, bold * 1.25 + pad * 2),
-    gap: 16 * scale * scale,
+    rowHeight: Math.max(ROW_HEIGHT * scale, BOLD_SIZE * 1.25 + pad * 2),
+    gap: 16 * Math.max(scale, 0.6),
   };
 }
 const CALIBRI = path.join(__dirname, '..', '..', 'assets', 'fonts', 'Calibri-Regular.ttf');
@@ -171,9 +175,10 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
   const leftBlockEnd = doc.y;
 
   doc.font('Calibri-Bold').fontSize(BOLD_SIZE).fillColor('#000000');
-  doc.text(quotation.quotationNumber, 290, blockY, { width: 95, align: 'left', lineBreak: false });
+  // QT number + date sit at the top-right, ending just inside the letterhead's curve (QT_RIGHT)
+  doc.text(quotation.quotationNumber, QT_RIGHT - QT_WIDTH, blockY, { width: QT_WIDTH, align: 'right', lineBreak: false });
   doc.font('Calibri').fontSize(REG_SIZE).fillColor('#222222');
-  doc.text(formatDate(quotation.createdAt), 290, blockY + 16, { width: 95, align: 'left', lineBreak: false });
+  doc.text(formatDate(quotation.createdAt), QT_RIGHT - QT_WIDTH, blockY + 16, { width: QT_WIDTH, align: 'right', lineBreak: false });
 
   doc.y = Math.max(leftBlockEnd, blockY + 36) + 14;
 
@@ -208,8 +213,8 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
     const taxable = item.quantity * item.unitPrice * (1 - (item.discountPercent || 0) / 100);
     return [
       item.description,
-      Number(item.quantity).toLocaleString('en-IN', { maximumFractionDigits: 2 }),
-      item.unit || '',
+      isLumpSumLine(item) ? '' : Number(item.quantity).toLocaleString('en-IN', { maximumFractionDigits: 2 }),
+      isLumpSumLine(item) ? '' : item.unit || '',
       money(item.unitPrice, { decimals: false }),
       '=',
       money(taxable),
@@ -220,8 +225,8 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
   const noteText = quotation.terms ||
     `All prices quoted are valid for ${quotation.validityDays} days from the date of stated on the quotation. 70% advance for the order confirmation.`;
 
-  // Always one page: shrink the table + note just enough that everything fits above the footer,
-  // however many items there are (the pad's normal size whenever it already fits).
+  // Keep everything on one page when possible by tightening the row spacing (never the text size);
+  // if even the tightest rows don't fit, the remaining rows continue on a second letterhead page.
   const available = LH.bottom - FOOTER_HEIGHT - FOOTER_GAP - doc.y;
   const heightAt = (sz) => {
     const rows = itemRows.reduce((sum, cells) => sum + measureRow(doc, cells, sz), 0);
@@ -232,9 +237,34 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
   };
   let scale = 1;
   while (scale > MIN_SCALE && heightAt(sizesFor(scale)) > available) scale = Math.round((scale - 0.01) * 1000) / 1000;
-  const sz = sizesFor(scale);
+  const fitsOnePage = heightAt(sizesFor(scale)) <= available;
+  // Too many items for one page even when tight: use the normal spacing across two pages instead
+  const sz = fitsOnePage ? sizesFor(scale) : sizesFor(1);
 
-  itemRows.forEach((cells) => drawRow(doc, cells, { bodyOnly, sz }));
+  // Plan the page breaks up front: fill each page with rows, and if the totals + note + footer
+  // wouldn't fit after the last row, carry the last row over with them — so a page is never left
+  // holding only the footer.
+  const pageBreaks = new Set();
+  if (!fitsOnePage) {
+    doc.font('Calibri-Bold').fontSize(sz.bold);
+    const noteHeight = doc.heightOfString(`Note :  ${noteText}`, { width: rightEdge - x }) + doc.currentLineHeight(true);
+    const tailHeight = totalsRowCount * sz.rowHeight + sz.gap + noteHeight + FOOTER_GAP + FOOTER_HEIGHT;
+    let y = doc.y;
+    itemRows.forEach((cells, idx) => {
+      const h = measureRow(doc, cells, sz);
+      if (y + h > LH.bottom) { pageBreaks.add(idx); y = LH.top; }
+      y += h;
+    });
+    if (y + tailHeight > LH.bottom && itemRows.length > 0) pageBreaks.add(itemRows.length - 1);
+  }
+
+  itemRows.forEach((cells, idx) => {
+    if (pageBreaks.has(idx)) {
+      doc.addPage();
+      drawLetterhead(doc, { bodyOnly });
+    }
+    drawRow(doc, cells, { bodyOnly, sz });
+  });
 
   // Totals rows continue the same table grid
   drawTotalsRow(doc, 'Gross Total', quotation.subtotal, { bodyOnly, sz });
@@ -252,7 +282,7 @@ function renderQuotationPdf(doc, { company, customer, quotation, bodyOnly = fals
   doc.y += sz.gap;
 
   // Validity / advance note — entire line in bold (label + body)
-  ensureSpace(doc, 40 * scale, bodyOnly);
+  ensureSpace(doc, 40, bodyOnly);
   doc.font('Calibri-Bold').fontSize(sz.bold).fillColor('#000000');
   doc.text('Note :  ', x, doc.y, { continued: true, width: rightEdge - x });
   doc.text(noteText, { width: rightEdge - x });
